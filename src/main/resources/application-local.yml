@@ -1,0 +1,25 @@
+# Local/dev profile: in-memory H2 in MySQL-compat mode. No external services.
+# Run with: mvn spring-boot:run -Dspring-boot.run.profiles=local
+spring:
+  datasource:
+    url: jdbc:h2:mem:limits;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+  flyway:
+    enabled: true
+    locations: classpath:db/migration-h2
+  data:
+    redis:
+      # Redis is optional locally; caching falls back to no-op when absent.
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+limit-enforcement:
+  legacy:
+    total-cache-ttl: 5s
+  reconciler:
+    # Disabled by default locally to avoid noisy background calls; enable as needed.
+    enabled: false

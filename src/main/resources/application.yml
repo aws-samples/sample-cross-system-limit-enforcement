@@ -1,0 +1,96 @@
+spring:
+  application:
+    name: cross-system-limit-enforcement
+
+  # Default profile targets Aurora (MySQL-compatible). Use the "local" profile
+  # for an in-memory H2 database that mimics MySQL for development/tests.
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/limits}
+    username: ${DB_USERNAME:limits}
+    # NB-4: no weak fallback — startup fails fast and loud if DB_PASSWORD is
+    # unset. Dev defaults live in the `local` profile (H2), which overrides the
+    # whole datasource block.
+    password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 20
+      # Keep the reserve/commit transaction short; the gap lock is held for ms.
+      connection-timeout: 3000
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      # SD-2: TLS + AUTH for the pod->Redis hop. Defaults keep the local/stub
+      # profiles working (no TLS, no auth token when the env vars are unset).
+      password: ${REDIS_AUTH_TOKEN:}
+      ssl:
+        enabled: ${REDIS_SSL:false}
+
+server:
+  port: 8080
+
+# --- Domain / limit enforcement configuration ---------------------------------
+limit-enforcement:
+  # Default per-customer daily limit (currency units). The regulator's rule.
+  default-daily-limit: 50000000.00
+  currency: USD
+  # How long a RESERVED row holds capacity before the reconciler investigates.
+  reservation-ttl: 60s
+  # Hard safety valve: force-expire a stuck reservation after this window.
+  reservation-max-age: 1h
+  # Source of truth for the running total: COMPOSED (legacy + cloud) or CLOUD.
+  # Flip to CLOUD in Phase 3 of the migration; delete the legacy leg in Phase 4.
+  read-source: COMPOSED
+  # SD-1: server-side principal -> customer bindings, as "sub=customerId" pairs
+  # separated by commas. Empty means every transfer is rejected with 403.
+  principal-customer-mappings: ${PRINCIPAL_CUSTOMER_MAP:}
+
+  legacy:
+    # Read-only legacy daily-total API + core gateway + core status API.
+    daily-total-url: ${LEGACY_DAILY_TOTAL_URL:http://legacy-core/api/daily-total}
+    execute-url: ${LEGACY_EXECUTE_URL:http://legacy-core/api/transfers}
+    status-url: ${LEGACY_STATUS_URL:http://legacy-core/api/transfers/status}
+    # Short TTL cache of the legacy total to keep it off the hot path.
+    total-cache-ttl: 5s
+
+  reconciler:
+    enabled: true
+    # Cron: run every minute by default.
+    cron: "0 * * * * *"
+    batch-size: 200
+
+# --- Resilience4j: fail-closed on the legacy limit read -----------------------
+resilience4j:
+  circuitbreaker:
+    instances:
+      legacyDailyTotal:
+        sliding-window-size: 20
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+  timelimiter:
+    instances:
+      legacyDailyTotal:
+        timeout-duration: 2s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}

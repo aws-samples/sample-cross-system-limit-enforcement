@@ -1,0 +1,17 @@
+# End-to-end demo profile: H2 database + in-process stub legacy core.
+# Run with:
+#   mvn spring-boot:run "-Dspring-boot.run.profiles=local,stub-legacy"
+# Under this profile an in-process StubLegacyCore replaces the HTTP legacy
+# client, and its behaviour is arranged over HTTP at /stub/legacy/*.
+limit-enforcement:
+  default-daily-limit: 50000000.00
+  currency: USD
+  read-source: COMPOSED
+  reservation-ttl: 2s
+  reservation-max-age: 10s
+  reconciler:
+    enabled: true
+    # H2 has no SKIP LOCKED; use the plain locking claim for the demo.
+    skip-locked: false
+    cron: "*/5 * * * * *"
+    batch-size: 100
